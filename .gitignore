@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+ios/
+Payload/
+*.ipa
+sample-data/
+.env

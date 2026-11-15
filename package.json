@@ -1,0 +1,29 @@
+{
+  "name": "lead-hub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lead manager for Windows and iPhone with Supabase sync",
+  "main": "desktop/main.js",
+  "scripts": {
+    "desktop": "electron .",
+    "dist:win": "electron-builder --win portable",
+    "test": "node test/core.test.js",
+    "ios:prepare": "cap add ios && cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.2",
+    "@capacitor/ios": "8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2",
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.melek.leadhub",
+    "productName": "Lead Hub",
+    "files": ["desktop/**", "www/**", "package.json"],
+    "directories": { "output": "dist" },
+    "win": { "target": "portable" }
+  }
+}

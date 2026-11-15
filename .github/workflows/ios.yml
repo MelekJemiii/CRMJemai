@@ -1,0 +1,62 @@
+name: Build iPhone app (unsigned IPA)
+
+# Run it by hand: GitHub > Actions > "Build iPhone app" > Run workflow.
+# It produces LeadHub.ipa, unsigned, for Sideloadly to sign with your Apple ID.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Capacitor (skip Electron download)
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Generate the iOS project
+        run: |
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Show Xcode and schemes
+        run: |
+          xcodebuild -version
+          cd ios/App
+          if [ -d App.xcworkspace ]; then xcodebuild -list -workspace App.xcworkspace; else xcodebuild -list -project App.xcodeproj; fi
+
+      - name: Build without code signing
+        run: |
+          cd ios/App
+          if [ -d App.xcworkspace ]; then TARGET="-workspace App.xcworkspace"; else TARGET="-project App.xcodeproj"; fi
+          xcodebuild $TARGET \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$GITHUB_WORKSPACE/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package the IPA
+        run: |
+          APP=$(find "$GITHUB_WORKSPACE/build/Build/Products" -maxdepth 2 -name "*.app" -type d | head -n 1)
+          test -n "$APP" || { echo "No .app was produced"; exit 1; }
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry LeadHub.ipa Payload
+          ls -lh LeadHub.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LeadHub-ipa
+          path: LeadHub.ipa
+          if-no-files-found: error

@@ -1,0 +1,8 @@
+{
+  "appId": "com.melek.leadhub",
+  "appName": "Lead Hub",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never"
+  }
+}
