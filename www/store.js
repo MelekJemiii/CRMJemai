@@ -40,6 +40,11 @@
       if (p) p.name = name;
       this.save();
     }
+    async setTemplate(id, template) {
+      const p = this.data.projects.find((x) => x.id === id);
+      if (p) p.message_template = template;
+      this.save();
+    }
     async deleteProject(id) {
       this.data.projects = this.data.projects.filter((x) => x.id !== id);
       this.data.leads = this.data.leads.filter((l) => l.project_id !== id);
@@ -70,6 +75,8 @@
   function toDb(lead) {
     const row = pickFields(lead);
     if ('last_contacted' in row && !row.last_contacted) row.last_contacted = null;
+    // only sent when there is a link, so imports keep working on a database without the column yet
+    if ('mockup_url' in row && !row.mockup_url) delete row.mockup_url;
     return row;
   }
 
@@ -115,6 +122,9 @@
     }
     async renameProject(id, name) {
       check(await this.db.from('projects').update({ name }).eq('id', id));
+    }
+    async setTemplate(id, template) {
+      check(await this.db.from('projects').update({ message_template: template }).eq('id', id));
     }
     async deleteProject(id) {
       check(await this.db.from('projects').delete().eq('id', id));

@@ -34,6 +34,11 @@ create table if not exists public.leads (
   updated_at timestamptz not null default now()
 );
 
+-- Added later: the WhatsApp message template of each project.
+alter table public.projects add column if not exists message_template text not null default '';
+-- Added later: the JemaiStudio mockup link of each lead (Mockup button).
+alter table public.leads add column if not exists mockup_url text not null default '';
+
 create index if not exists leads_project_idx on public.leads (project_id);
 create index if not exists leads_user_idx on public.leads (user_id);
 create index if not exists projects_user_idx on public.projects (user_id);

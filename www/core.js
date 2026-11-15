@@ -24,6 +24,7 @@
     ['notes', 'Notes'],
     ['address', 'Address'],
     ['maps_url', 'Google Maps'],
+    ['mockup_url', 'Mockup'],
   ];
   const FIELD_KEYS = FIELDS.map((f) => f[0]);
 
@@ -43,6 +44,7 @@
     notes: ['notes', 'note', 'comment', 'comments', 'remarks'],
     address: ['address', 'location', 'street'],
     maps_url: ['google maps', 'maps', 'maps link', 'map', 'google maps link', 'maps url'],
+    mockup_url: ['mockup', 'maquette', 'mockup link', 'mockup url', 'lien maquette'],
   };
   const ALIAS_LOOKUP = {};
   for (const key of Object.keys(ALIASES)) for (const a of ALIASES[key]) ALIAS_LOOKUP[a] = key;
@@ -217,6 +219,56 @@
     return digits.length >= 8 ? 'https://wa.me/' + digits : '';
   }
 
+  // Digits of the lead's WhatsApp number, or '' when the WhatsApp field has none.
+  function whatsappDigits(lead) {
+    const url = whatsappUrl(lead);
+    if (!url) return '';
+    const u = new URL(url);
+    const digits = (u.hostname === 'wa.me' ? u.pathname : u.searchParams.get('phone') || '').replace(/\D/g, '');
+    return /^\d{8,15}$/.test(digits) ? digits : '';
+  }
+
+  // Fills {name}, {category}, {phone} and {address} in a project's message template for one lead.
+  function fillTemplate(template, lead) {
+    const values = { name: lead.name, category: lead.category, phone: lead.phone, address: lead.address, mockup: lead.mockup_url };
+    return String(template || '')
+      .replace(/\{(name|category|phone|address|mockup)\}/gi, (m, key) => String(values[key.toLowerCase()] || '').trim())
+      .trim()
+      .slice(0, 2000);
+  }
+
+  // ---------- JemaiStudio mockups (Lead Hub's « Mockup » button) ----------
+  function slugify(s) {
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 55).replace(/-+$/, '');
+  }
+
+  // « 12 Av. X, 83140 Six-Fours-les-Plages, France » → « Six-Fours-les-Plages »; otherwise the last useful part.
+  function cityFromAddress(address) {
+    const a = String(address || '');
+    const m = a.match(/\b(?:0[1-9]|[1-8]\d|9[0-8]|2[AB])\d{3}\s+([^,\d][^,]*)/i);
+    if (m) return m[1].replace(/\s+cedex.*$/i, '').trim().slice(0, 80);
+    const parts = a.split(',').map((x) => x.trim()).filter((x) => x && !/^(france|saudi arabia|tunisia|tunisie)$/i.test(x) && !/\d/.test(x));
+    return (parts[parts.length - 1] || '').slice(0, 80);
+  }
+
+  // What the mockup panel opens with: everything Lead Hub already knows about the lead.
+  function mockupDraft(lead) {
+    const city = cityFromAddress(lead.address);
+    const trade = String(lead.category || '').trim();
+    const lines = [];
+    lines.push((lead.name || '') + (trade ? ', ' + trade.toLowerCase() : '') + (city ? ' à ' + city : '') + '.');
+    const notes = String(lead.notes || '').trim();
+    if (notes) lines.push(notes);
+    return {
+      name: String(lead.name || '').trim(),
+      city,
+      trade,
+      description: lines.join('\n').slice(0, 3000),
+      slug: slugify((lead.name || '') + ' ' + city),
+    };
+  }
+
   function instagramUrl(value) {
     const s = String(value || '').trim();
     if (!s) return '';
@@ -286,7 +338,7 @@
   return {
     STATUSES, PRIORITIES, FIELDS, FIELD_KEYS,
     parseCsv, toCsv, csvToLeads, leadsToCsv, mapHeaders, cleanLead, dedupe,
-    safeUrl, telUrl, whatsappUrl, instagramUrl,
+    safeUrl, telUrl, whatsappUrl, whatsappDigits, fillTemplate, instagramUrl, slugify, cityFromAddress, mockupDraft,
     filterLeads, sortLeads, statsFor, computeStats, uuid,
   };
 });

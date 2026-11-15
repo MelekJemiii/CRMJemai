@@ -6,6 +6,9 @@
   const $overlay = document.getElementById('overlay-root');
   const $file = document.getElementById('csv-file');
   const PAGE = 200;
+  // Present only inside the Windows app: controls for the WhatsApp Web side panel.
+  const desktop = window.leadHubDesktop && window.leadHubDesktop.whatsapp ? window.leadHubDesktop.whatsapp : null;
+  const wa = { open: false, width: 0 };
 
   const state = {
     store: null, client: null, user: null,
@@ -219,7 +222,9 @@
       h('div', { class: 'sidebar-foot' },
         h('div', { class: 'who' }, h('span', { class: 'dot' + (state.syncError ? ' err' : cloud ? '' : ' off') }), status + (cloud && state.user ? ' · ' + state.user.email : '')),
         h('div', { class: 'row' },
+          desktop ? h('button', { class: 'btn small', text: wa.open ? 'Hide WhatsApp' : 'WhatsApp', onclick: () => desktop.toggle() }) : null,
           cloud ? h('button', { class: 'btn small', text: 'Refresh', onclick: () => refresh(false) }) : null,
+          h('button', { class: 'btn small', text: 'Mockups', title: 'JemaiStudio mockup settings', onclick: () => mockupSettings() }),
           h('button', { class: 'btn small', text: cloud ? 'Sign out' : 'Switch to sync', onclick: leave }))));
   }
 
@@ -305,6 +310,7 @@
           h('button', { class: 'btn primary', text: 'Add lead', onclick: addLead }),
           h('button', { class: 'btn', text: 'Import CSV', onclick: () => $file.click() }),
           h('button', { class: 'btn', text: 'Export CSV', onclick: exportCsv }),
+          h('button', { class: 'btn', text: 'Message', onclick: editTemplate }),
           h('button', { class: 'btn', text: 'Rename', onclick: renameProject }),
           h('button', { class: 'btn danger', text: 'Delete', onclick: deleteProject }))),
       h('div', { class: 'toolbar' },
@@ -397,6 +403,38 @@
     await run(() => state.store.renameProject(project.id, name), 'Could not rename');
   }
 
+  const TEMPLATE_SQL = "alter table public.projects add column if not exists message_template text not null default '';";
+
+  async function editTemplate() {
+    const project = currentProject();
+    const area = h('textarea', { class: 'input', dir: 'auto', maxlength: '2000', placeholder: 'Hello {name}, ...', 'aria-label': 'Message template' });
+    area.value = project.message_template || '';
+    const pending = modal({
+      title: 'WhatsApp message',
+      message: 'Write it once for this project. It is filled in for each lead when you press WhatsApp, and you send it yourself.\nPlaceholders: {name}, {category}, {phone}, {address}, {mockup} (the lead\'s mockup link).',
+      extra: area,
+      confirmLabel: 'Save',
+    });
+    area.focus();
+    if (!(await pending)) return;
+    const value = area.value.trim();
+    const previous = project.message_template || '';
+    project.message_template = value;
+    try {
+      await state.store.setTemplate(project.id, value);
+      toast(value ? 'Message saved' : 'Message cleared');
+    } catch (e) {
+      project.message_template = previous;
+      const text = (e && e.message) || String(e);
+      const missingColumn = /message_template/.test(text);
+      await modal({
+        title: missingColumn ? 'One database update needed' : 'Could not save the message',
+        message: missingColumn ? 'In Supabase, open SQL Editor, run this line, then save the message again:\n\n' + TEMPLATE_SQL : text,
+        cancelLabel: null,
+      });
+    }
+  }
+
   async function deleteProject() {
     const project = currentProject();
     const n = projectLeads(project.id).length;
@@ -406,6 +444,166 @@
     state.projects = state.projects.filter((p) => p.id !== project.id);
     state.leads = state.leads.filter((l) => l.project_id !== project.id);
     go('dashboard');
+  }
+
+  // ---------- JemaiStudio mockups ----------
+  // The key only makes mockups (MOCKUP_API_SECRET on Vercel). It stays on this device: never synced, never in a CSV.
+  const MOCKUP_KEY = 'leadhub.mockup';
+  const MOCKUP_SQL = "alter table public.leads add column if not exists mockup_url text not null default '';";
+  function getMockupConn() {
+    try {
+      const c = JSON.parse(localStorage.getItem(MOCKUP_KEY)) || {};
+      return { url: c.url || 'https://app.jemaistudio.dev', key: c.key || '' };
+    } catch {
+      return { url: 'https://app.jemaistudio.dev', key: '' };
+    }
+  }
+
+  async function mockupSettings() {
+    const conn = getMockupConn();
+    const url = h('input', { class: 'input', type: 'url', value: conn.url, placeholder: 'https://app.jemaistudio.dev', spellcheck: 'false' });
+    const key = h('input', { class: 'input', type: 'password', value: conn.key, placeholder: 'MOCKUP_API_SECRET', autocomplete: 'off', spellcheck: 'false' });
+    const ok = await modal({
+      title: 'Mockup settings',
+      message: 'Lead Hub asks your JemaiStudio app to build each mockup. Paste the MOCKUP_API_SECRET you set on Vercel. It stays on this device only.',
+      extra: h('div', { class: 'stack' }, field('JemaiStudio app', url), field('Mockup key', key)),
+      confirmLabel: 'Save',
+    });
+    if (!ok) return false;
+    const u = C.safeUrl(url.value.trim(), ['https:']);
+    if (!u) {
+      toast('The app address must start with https://');
+      return false;
+    }
+    localStorage.setItem(MOCKUP_KEY, JSON.stringify({ url: u.replace(/\/+$/, ''), key: key.value.trim() }));
+    toast('Mockup settings saved');
+    return true;
+  }
+
+  async function saveMockupLink(lead, url) {
+    Object.assign(lead, { mockup_url: url });
+    try {
+      await state.store.updateLead(lead.id, { mockup_url: url });
+      return true;
+    } catch (e) {
+      const text = (e && e.message) || String(e);
+      await modal({
+        title: /mockup_url/.test(text) ? 'One database update needed' : 'Could not save the link',
+        message: /mockup_url/.test(text)
+          ? 'The mockup is online, but Lead Hub could not store its link. In Supabase, open SQL Editor and run this line once:\n\n' + MOCKUP_SQL + '\n\nThe link for now: ' + url
+          : text + '\n\nThe link: ' + url,
+        cancelLabel: null,
+      });
+      return false;
+    }
+  }
+
+  function mockupPanel(lead) {
+    if (!getMockupConn().key) {
+      mockupSettings().then((saved) => saved && getMockupConn().key && mockupPanel(lead));
+      return;
+    }
+    const d = C.mockupDraft(lead);
+    const input = (value, attrs) => h('input', Object.assign({ class: 'input', value: value || '', dir: 'auto' }, attrs || {}));
+    const name = input(d.name, { maxlength: '120' });
+    const city = input(d.city, { maxlength: '80' });
+    const trade = input(d.trade, { maxlength: '80', placeholder: 'Plombier, fleuriste…' });
+    const desc = h('textarea', { class: 'input tall', dir: 'auto', maxlength: '3000', placeholder: 'What they do, the towns they cover, reviews, opening hours… Only what you write here can appear as a fact.' });
+    desc.value = d.description;
+    const slug = input(d.slug, { maxlength: '55', dir: 'ltr', spellcheck: 'false' });
+    const choice = (pairs) => select(pairs, 'auto', () => {});
+    const mode = choice([['auto', 'Auto'], ['sombre', 'Dark'], ['clair', 'Light']]);
+    const type = choice([['auto', 'Auto'], ['serif', 'Serif (elegant)'], ['moderne', 'Modern (sans)']]);
+    const style = choice([['auto', 'Auto (best fit)'], ['vert', 'Courant Vert · light green'], ['lumen', 'Lumen · dark violet'], ['sos', 'SOS · urgent red'], ['volt', 'Volt · black & yellow'], ['caloria', 'Caloria · warm, form on top'], ['atelier', 'Atelier · editorial beige'], ['lefort', 'Lefort · family craft'], ['plouf', 'Plouf · friendly blue'], ['hydra', 'Hydra · night urgent'], ['durand', 'Durand · navy & copper']]);
+    const linkPreview = h('p', { class: 'hint', dir: 'ltr' });
+    const showLink = () => {
+      const base = getMockupConn().url.replace(/\/+$/, '');
+      linkPreview.textContent = lead.mockup_url ? 'Keeps its link: ' + lead.mockup_url : base + '/m/' + (C.slugify(slug.value) || C.slugify(name.value + ' ' + city.value) || '…') + '-xxxx';
+    };
+    slug.addEventListener('input', showLink);
+    showLink();
+    const statusEl = h('p', { class: 'hint', role: 'status', 'aria-live': 'polite' });
+    const result = h('div', { class: 'mockup-result' });
+    const genBtn = h('button', { class: 'btn primary', text: lead.mockup_url ? 'Make a new design' : 'Generate' });
+    const cancel = h('button', { class: 'btn', text: 'Close' });
+    let busy = null;
+    const close = () => {
+      if (busy) busy.abort();
+      backdrop.remove();
+    };
+    cancel.addEventListener('click', close);
+
+    genBtn.addEventListener('click', async () => {
+      if (busy) return;
+      if (name.value.trim().length < 2) return toast('Add the business name.');
+      if (desc.value.trim().length < 20) return toast('Describe the business in a sentence or two.');
+      const conn = getMockupConn();
+      busy = new AbortController();
+      const timer = setTimeout(() => busy && busy.abort(), 75000);
+      const started = Date.now();
+      const tick = setInterval(() => { statusEl.textContent = 'Writing and designing the page… ' + Math.round((Date.now() - started) / 1000) + ' s (usually 20–40 s)'; }, 1000);
+      genBtn.disabled = true;
+      genBtn.textContent = 'Generating…';
+      clear(result);
+      statusEl.textContent = 'Writing and designing the page…';
+      try {
+        const res = await fetch(conn.url.replace(/\/+$/, '') + '/api/mockups/from-description', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: 'Bearer ' + conn.key },
+          body: JSON.stringify({
+            name: name.value.trim(), city: city.value.trim(), trade: trade.value.trim(), description: desc.value.trim(),
+            phone: lead.phone || '', email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email || '') ? lead.email : '', address: lead.address || '',
+            slug: C.slugify(slug.value),
+            design: { mode: mode.value, type: type.value, style: style.value },
+          }),
+          signal: busy.signal,
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.url) throw new Error(body.error || 'The app answered ' + res.status);
+        const url = C.safeUrl(body.url, ['https:']);
+        if (!url) throw new Error('The app returned an unexpected link.');
+        statusEl.textContent = (body.upgraded ? 'New design, same link. ' : 'Mockup ready. ') + (body.what || '') + (body.notes && body.notes.length ? ' · ' + body.notes.join(' · ') : '');
+        result.append(
+          h('a', { class: 'mockup-link', href: url, target: '_blank', rel: 'noopener noreferrer', dir: 'ltr', text: url }),
+          h('div', { class: 'row' },
+            h('a', { class: 'btn small primary', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'Open' }),
+            h('button', { class: 'btn small', text: 'Copy link', onclick: () => navigator.clipboard.writeText(url).then(() => toast('Link copied'), () => toast('Copy failed: select the link')) })));
+        if (await saveMockupLink(lead, url)) {
+          toast('Mockup link saved on the lead');
+          if (state.selected === lead.id) renderDrawer();
+          renderList();
+        }
+        genBtn.textContent = 'Make a new design';
+      } catch (e) {
+        const aborted = e && e.name === 'AbortError';
+        statusEl.textContent = '';
+        result.append(h('p', { class: 'error-text', text: aborted ? 'Stopped: no answer after 75 s. Try again.' : (e.message || String(e)) }));
+        if (!aborted && /Clé refusée|401/.test(e.message || '')) result.append(h('button', { class: 'btn small', text: 'Check the key', onclick: () => { close(); mockupSettings(); } }));
+        genBtn.textContent = 'Try again';
+      } finally {
+        clearTimeout(timer);
+        clearInterval(tick);
+        busy = null;
+        genBtn.disabled = false;
+      }
+    });
+
+    const box = h('div', { class: 'modal wide', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Mockup' },
+      h('h2', { text: lead.mockup_url ? 'Redo the mockup' : 'Mockup for ' + (lead.name || 'this lead') }),
+      h('p', { text: 'A JemaiStudio page written from your description, at your link. Numbers, reviews and labels only appear if they are in the description.' }),
+      h('div', { class: 'two' }, field('Name', name), field('Town', city)),
+      field('Trade', trade),
+      field('Description', desc),
+      h('div', { class: 'three' }, field('Template', style), field('Mood', mode), field('Type', type)),
+      lead.mockup_url ? null : field('Link', slug),
+      linkPreview,
+      statusEl,
+      result,
+      h('div', { class: 'row' }, cancel, genBtn));
+    box.addEventListener('keydown', (e) => e.key === 'Escape' && !busy && close());
+    const backdrop = h('div', { class: 'modal-backdrop', onclick: (e) => e.target === backdrop && !busy && close() }, box);
+    $overlay.append(backdrop);
+    desc.focus();
   }
 
   // ---------- drawer ----------
@@ -420,11 +618,30 @@
       clear(quick);
       const link = (label, url) => url && quick.append(h('a', { class: 'btn small', href: url, target: '_blank', rel: 'noopener noreferrer', text: label }));
       link('Call', C.telUrl(lead.phone));
-      link('WhatsApp', C.whatsappUrl(lead));
+      const waDigits = C.whatsappDigits(lead);
+      const project = state.projects.find((p) => p.id === lead.project_id);
+      const message = C.fillTemplate(project && project.message_template, lead);
+      // Opening the chat counts as the first contact; the status can be changed back by hand.
+      const markMessaged = () => {
+        if (lead.status !== 'Not contacted') return;
+        patchLead(lead.id, { status: 'Messaged', last_contacted: new Date().toISOString().slice(0, 10) }, true).then(renderDrawer);
+        toast('Marked as messaged');
+      };
+      if (desktop && waDigits) {
+        quick.append(h('button', { class: 'btn small', text: 'WhatsApp', onclick: () => {
+          desktop.open(waDigits, message);
+          markMessaged();
+        } }));
+      } else if (waDigits) {
+        const url = 'https://wa.me/' + waDigits + (message ? '?text=' + encodeURIComponent(message) : '');
+        quick.append(h('a', { class: 'btn small', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'WhatsApp', onclick: markMessaged }));
+      } else link('WhatsApp', C.whatsappUrl(lead));
       link('Instagram', C.instagramUrl(lead.instagram));
       link('Website', C.safeUrl(lead.website));
       link('Maps', C.safeUrl(lead.maps_url));
       if (lead.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email)) link('Email', 'mailto:' + lead.email);
+      link('Open mockup', C.safeUrl(lead.mockup_url, ['https:']));
+      quick.append(h('button', { class: 'btn small accent', text: lead.mockup_url ? 'Redo mockup' : 'Mockup', onclick: () => mockupPanel(lead) }));
     }
     renderQuick();
     const today = new Date().toISOString().slice(0, 10);
@@ -581,6 +798,28 @@
   document.addEventListener('visibilitychange', backgroundSync);
   window.addEventListener('focus', backgroundSync);
   setInterval(backgroundSync, 60000);
+  // Header strip above the WhatsApp panel, with the button that closes it.
+  function renderWhatsAppBar() {
+    document.querySelectorAll('.wa-bar').forEach((el) => el.remove());
+    if (!wa.open) return;
+    document.body.append(h('div', { class: 'wa-bar' },
+      h('strong', { text: 'WhatsApp' }),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn small', text: 'All chats', onclick: () => desktop.home() }),
+        h('button', { class: 'btn small', text: 'Close', onclick: () => desktop.close() }))));
+  }
+
+  if (desktop) {
+    desktop.onState((next) => {
+      wa.open = next.open;
+      wa.width = next.width;
+      document.documentElement.style.setProperty('--wa-w', (wa.open ? wa.width : 0) + 'px');
+      document.body.classList.toggle('wa-open', wa.open);
+      renderWhatsAppBar();
+      if (state.store) refreshSidebarCounts();
+    });
+    desktop.requestState();
+  }
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.selected && !$overlay.childElementCount) closeLead();
   });
