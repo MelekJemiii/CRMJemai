@@ -252,20 +252,37 @@
     return (parts[parts.length - 1] || '').slice(0, 80);
   }
 
+  // Google names often carry the services: « ADEPT Plomberie -Recherche de fuite, … » → name + services.
+  function splitListingName(raw) {
+    const s = String(raw || '').replace(/\s+/g, ' ').trim();
+    const m = s.match(/^(.{2,}?)(?:\s+[-–—|·:]\s*|\s*[–—|·]\s+|\s*\|\s*)(.+)$/);
+    return m ? { name: m[1].trim().slice(0, 80), extra: m[2].trim() } : { name: s.slice(0, 80), extra: '' };
+  }
+
+  // A slug, or a whole mockup link pasted in the link field, as a slug.
+  function slugInput(raw) {
+    let s = String(raw || '').trim().toLowerCase();
+    const m = s.match(/\/m\/([^/?#]+)/);
+    if (m) s = m[1];
+    return slugify(s.replace(/^https?:\/\/[^/]+\/?/, '').replace(/\.html$/, ''));
+  }
+
   // What the mockup panel opens with: everything Lead Hub already knows about the lead.
   function mockupDraft(lead) {
     const city = cityFromAddress(lead.address);
     const trade = String(lead.category || '').trim();
+    const { name, extra } = splitListingName(lead.name);
     const lines = [];
-    lines.push((lead.name || '') + (trade ? ', ' + trade.toLowerCase() : '') + (city ? ' à ' + city : '') + '.');
+    lines.push(name + (trade ? ', ' + trade.toLowerCase() : '') + (city ? ' à ' + city : '') + '.');
+    if (extra) lines.push('Services : ' + extra.replace(/[.\s]+$/, '') + '.');
     const notes = String(lead.notes || '').trim();
     if (notes) lines.push(notes);
     return {
-      name: String(lead.name || '').trim(),
+      name,
       city,
       trade,
       description: lines.join('\n').slice(0, 3000),
-      slug: slugify((lead.name || '') + ' ' + city),
+      slug: slugify(name + ' ' + city),
     };
   }
 
@@ -338,7 +355,7 @@
   return {
     STATUSES, PRIORITIES, FIELDS, FIELD_KEYS,
     parseCsv, toCsv, csvToLeads, leadsToCsv, mapHeaders, cleanLead, dedupe,
-    safeUrl, telUrl, whatsappUrl, whatsappDigits, fillTemplate, instagramUrl, slugify, cityFromAddress, mockupDraft,
+    safeUrl, telUrl, whatsappUrl, whatsappDigits, fillTemplate, instagramUrl, slugify, slugInput, splitListingName, cityFromAddress, mockupDraft,
     filterLeads, sortLeads, statsFor, computeStats, uuid,
   };
 });

@@ -111,5 +111,12 @@ check('prepares the mockup panel from a French lead', () => {
   assert.ok(d.description.includes('plombier à Six-Fours-les-Plages') && d.description.includes('41 avis'));
   assert.strictEqual(C.fillTemplate('Voici votre maquette : {mockup}', { mockup_url: 'https://app.jemaistudio.dev/m/x-1a2b' }), 'Voici votre maquette : https://app.jemaistudio.dev/m/x-1a2b');
   assert.strictEqual(C.mapHeaders(['Name', 'Maquette'])[1], 'mockup_url');
+  const g = C.mockupDraft({ name: 'ADEPT Plomberie -Recherche de fuite, Dépannage chauffe-eau, Climatisation', category: 'Plombier', address: '83140 Six-Fours-les-Plages' });
+  assert.strictEqual(g.name, 'ADEPT Plomberie');
+  assert.strictEqual(g.slug, 'adept-plomberie-six-fours-les-plages');
+  assert.ok(g.description.includes('Services : Recherche de fuite, Dépannage chauffe-eau, Climatisation.'));
+  assert.strictEqual(C.slugInput('https://app.jemaistudio.dev/m/adept-plomberie'), 'adept-plomberie');
+  assert.strictEqual(C.slugInput('Adept Plomberie'), 'adept-plomberie');
+  assert.strictEqual(C.splitListingName('Saint-Martin Fleurs').name, 'Saint-Martin Fleurs');
 });
 console.log('\nAll ' + n + ' checks passed.');

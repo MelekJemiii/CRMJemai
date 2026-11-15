@@ -510,7 +510,7 @@
     const trade = input(d.trade, { maxlength: '80', placeholder: 'Plombier, fleuriste…' });
     const desc = h('textarea', { class: 'input tall', dir: 'auto', maxlength: '3000', placeholder: 'What they do, the towns they cover, reviews, opening hours… Only what you write here can appear as a fact.' });
     desc.value = d.description;
-    const slug = input(d.slug, { maxlength: '55', dir: 'ltr', spellcheck: 'false' });
+    const slug = input(d.slug, { maxlength: '200', dir: 'ltr', spellcheck: 'false', placeholder: 'adept-plomberie (or paste a link)' });
     const choice = (pairs) => select(pairs, 'auto', () => {});
     const mode = choice([['auto', 'Auto'], ['sombre', 'Dark'], ['clair', 'Light']]);
     const type = choice([['auto', 'Auto'], ['serif', 'Serif (elegant)'], ['moderne', 'Modern (sans)']]);
@@ -518,7 +518,7 @@
     const linkPreview = h('p', { class: 'hint', dir: 'ltr' });
     const showLink = () => {
       const base = getMockupConn().url.replace(/\/+$/, '');
-      linkPreview.textContent = lead.mockup_url ? 'Keeps its link: ' + lead.mockup_url : base + '/m/' + (C.slugify(slug.value) || C.slugify(name.value + ' ' + city.value) || '…') + '-xxxx';
+      linkPreview.textContent = lead.mockup_url ? 'Keeps its link: ' + lead.mockup_url : base + '/m/' + (C.slugInput(slug.value) || C.slugify(name.value + ' ' + city.value) || '…') + '-xxxx';
     };
     slug.addEventListener('input', showLink);
     showLink();
@@ -551,9 +551,9 @@
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: 'Bearer ' + conn.key },
           body: JSON.stringify({
-            name: name.value.trim(), city: city.value.trim(), trade: trade.value.trim(), description: desc.value.trim(),
+            name: C.splitListingName(name.value).name, city: city.value.trim(), trade: trade.value.trim(), description: desc.value.trim(),
             phone: lead.phone || '', email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email || '') ? lead.email : '', address: lead.address || '',
-            slug: C.slugify(slug.value),
+            slug: C.slugInput(slug.value),
             design: { mode: mode.value, type: type.value, style: style.value },
           }),
           signal: busy.signal,
@@ -589,7 +589,7 @@
     });
 
     const box = h('div', { class: 'modal wide', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Mockup' },
-      h('h2', { text: lead.mockup_url ? 'Redo the mockup' : 'Mockup for ' + (lead.name || 'this lead') }),
+      h('h2', { text: lead.mockup_url ? 'Redo the mockup' : 'Mockup for ' + (d.name || 'this lead') }),
       h('p', { text: 'A JemaiStudio page written from your description, at your link. Numbers, reviews and labels only appear if they are in the description.' }),
       h('div', { class: 'two' }, field('Name', name), field('Town', city)),
       field('Trade', trade),
